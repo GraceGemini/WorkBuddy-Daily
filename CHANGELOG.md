@@ -1,5 +1,12 @@
 # 更新日志
 
+## v3.30（2026-10-30）
+
+- 对齐 WorkBuddy 官方客户端 5.9.3（国内版）：桌面 UA 更新为 `WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0`，`DESKTOP_VERSION_CN` / 事件指纹 `ideVersion` 与 `extVersion` 同步 5.9.3。
+- 桌面事件指纹的 `releaseDate` / `commit` 更新为 5.9.3 实测值，避免旧版本常量成为稳定的网关特征。
+- 仅调整国内版桌面指纹；国际版 5.9.3 的聊天头族仍按 pilot 处理，待真实账号抓包验证后再动。
+- 59 项测试全部通过。
+
 ## v3.29（2026-10-30）
 
 - 修复 Issue #42（1）：`ACCOUNTS = load_accounts()` 在 `uid_of()` 定义前执行；v3.27 给 `refresh_one` 增加 `X-User-Id` 后，首次自动续期会触发 `NameError: name 'uid_of' is not defined`，请求根本发不出去。现将 `uid_of` 定义提前到 `refresh_one` 之前，续期恢复发送并携带 `X-User-Id`。

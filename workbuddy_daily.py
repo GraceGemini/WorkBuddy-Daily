@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌱 WorkBuddy Daily - 全能签到脚本 v3.29
+🌱 WorkBuddy Daily - 全能签到脚本 v3.30
 ════════════════════════════════════════════════════════════════
 
 📌 这是什么
@@ -157,7 +157,7 @@
    · 礼包补偿：先查 active/claimed/credit_num，再按回执 credit 判定本次到账；本地按活动期防重
    · 企业形态以账号 enterpriseId 为准；token_source 只表示授权流程，不作为跳过任务依据
    · 会话 ID：conversationId 用 UUID v4，request/message ID 用 32 hex 毫秒前缀；不再上报项目缩写前缀
-   · 官方指纹：CN 桌面 UA/版本/commit/releaseDate/cpu/内存对齐 5.8.3，并补 qimei36
+   · 官方指纹：CN 桌面 UA/版本/commit/releaseDate/cpu/内存对齐 5.9.3，并补 qimei36
    · 网页会话收尾：真实对话完成即 stop，失败再 delete；撞 10105 时自动清理同前缀旧会话
    · 凭据失效隔离：AT/RT 过期或格式错只跳过该账号并给出排障提示，不再整轮崩溃
    · 子任务开关：WORKBUDDY_TASKS（白名单）/ WORKBUDDY_SKIP_TASKS（黑名单）——
@@ -208,10 +208,10 @@ CBDOMAIN = "https://www.codebuddy.cn"   # codebuddy 域（小程序埋点 / 技�
 WEB_CONVERSATIONS_PATH = "/console/webchat/conversations"
 WEB_CONVERSATION_ACTIVE_STATUSES = ("working", "creating", "pending")
 WEB_CONVERSATION_PRUNE_KEEP = 8
-WORKBUDDY_UA_CN = "WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0"
-DESKTOP_VERSION_CN = "5.8.3"
-DESKTOP_COMMIT_CN = "db0e9b51b7fa0b383f41f5b0b83dd442c8557918"
-DESKTOP_RELEASE_CN = 1792029498676
+WORKBUDDY_UA_CN = "WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0"
+DESKTOP_VERSION_CN = "5.9.3"
+DESKTOP_COMMIT_CN = "c41253385fa07bebfcae8a7a4728914f09af96d0"
+DESKTOP_RELEASE_CN = 1789632000000
 UA = WORKBUDDY_UA_CN
 
 # ---------- 任务代码 → 中文名映射 ----------

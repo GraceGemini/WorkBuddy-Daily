@@ -1357,13 +1357,13 @@ class CoreBehaviorTests(unittest.TestCase):
         module = load_functions(
             "derive_id", "desktop_fingerprint",
             hashlib=hashlib, time=time,
-            DESKTOP_RELEASE_CN=1792029498676,
-            DESKTOP_COMMIT_CN="db0e9b51b7fa0b383f41f5b0b83dd442c8557918",
-            DESKTOP_VERSION_CN="5.8.3",
+            DESKTOP_RELEASE_CN=1789632000000,
+            DESKTOP_COMMIT_CN="c41253385fa07bebfcae8a7a4728914f09af96d0",
+            DESKTOP_VERSION_CN="5.9.3",
         )
         fp = module["desktop_fingerprint"]("uid-1", "nick")
-        self.assertEqual("5.8.3", fp["ideVersion"])
-        self.assertEqual("5.8.3", fp["extVersion"])
+        self.assertEqual("5.9.3", fp["ideVersion"])
+        self.assertEqual("5.9.3", fp["extVersion"])
         self.assertEqual("10.0.28000", fp["osVersion"])
         self.assertEqual(8, fp["cpuCores"])
         self.assertEqual(16, fp["memorySize"])
@@ -1389,10 +1389,10 @@ class CoreBehaviorTests(unittest.TestCase):
             "_new_message_id", "derive_id", "desktop_fingerprint",
             "report_desktop_events",
             hashlib=hashlib, time=time, uuid=uuid, requests=requests_module,
-            DESKTOP_RELEASE_CN=1792029498676,
-            DESKTOP_COMMIT_CN="db0e9b51b7fa0b383f41f5b0b83dd442c8557918",
-            DESKTOP_VERSION_CN="5.8.3",
-            DESKTOP_UA="WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0",
+            DESKTOP_RELEASE_CN=1789632000000,
+            DESKTOP_COMMIT_CN="c41253385fa07bebfcae8a7a4728914f09af96d0",
+            DESKTOP_VERSION_CN="5.9.3",
+            DESKTOP_UA="WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0",
             DESKTOP_BASE="https://copilot.tencent.com",
         )
         source = type("Source", (), {
@@ -1447,7 +1447,7 @@ class CoreBehaviorTests(unittest.TestCase):
                     "t_daily_activity",
                     os=os, json=json, time=time, uuid=uuid,
                     CBDOMAIN="https://www.codebuddy.cn",
-                    WORKBUDDY_UA_CN="WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0",
+                    WORKBUDDY_UA_CN="WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0",
                     beijing_today=lambda: __import__("datetime").date(2026, 10, 22),
                     _env_enabled=lambda name, default=True: True,
                     _heatmap_today_score=heatmap_score,
@@ -1486,7 +1486,7 @@ class CoreBehaviorTests(unittest.TestCase):
                     "t_daily_activity",
                     os=os, json=json, time=fake_time, uuid=uuid,
                     CBDOMAIN="https://www.codebuddy.cn",
-                    WORKBUDDY_UA_CN="WorkBuddy/5.8.3 WorkBuddy/5.8.3 CLI/2.161.0",
+                    WORKBUDDY_UA_CN="WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0",
                     beijing_today=lambda: __import__("datetime").date(2026, 10, 22),
                     _env_enabled=lambda name, default=True: True,
                     _heatmap_today_score=lambda session: 0,
