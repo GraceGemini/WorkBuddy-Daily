@@ -1,5 +1,13 @@
 # 更新日志
 
+## v3.33（2026-10-30）
+
+- 修复「UI 任务中心能看到、脚本却提示不在当前任务列表」：专家任务查询原来只读桌面 `/v2/activity/growth/tasks`；现在 `_expert_task_row` / `_expert_prog` 在桌面未命中时回落小程序口径（`X-Client-Platform: miniprogram`）。
+- `_dynamic_expert_task_codes` 同时合并桌面与 MP 的 `expert_use_*`，不再只依赖桌面列表。
+- `_accept_expert_task` 先按桌面口径 accept，失败再走 MP `_mp_accept_res`；MP-only 账号不再卡在 `task not found`。
+- `claim_ready_tasks` 区分「桌面+MP 都有」与「只在 MP 出现」：前者仍走桌面 claim，后者改用 MP claim，避免专家任务完成后无法领奖。
+- 新增 2 项回归（MP 回落、MP-only 领奖），测试总数 63 项。
+
 ## v3.32（2026-10-30）
 
 - 修复动态解锁的专家任务一直停在 `not_accepted`：`_run_local_expert_task` 原来只读 `prog()`，不补 accept；任务在 `t_accept_all` 之后才出现时，真实对话和 `expert_actual_use` 都不会计入进度，日志只剩 `not_accepted None/None`。

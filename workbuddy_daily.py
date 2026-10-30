@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌱 WorkBuddy Daily - 全能签到脚本 v3.32
+🌱 WorkBuddy Daily - 全能签到脚本 v3.33
 ════════════════════════════════════════════════════════════════
 
 📌 这是什么
@@ -1165,7 +1165,7 @@ def _expert_spec_for_task(s, code):
     stored = EXPERT_TASK_SPECS.get(code)
     if not stored and not str(code).startswith("expert_use_"):
         return {}
-    row = _growth_task_row(s, code) or {}
+    row = _expert_task_row(s, code) or {}
     title = str(
         row.get("title") or row.get("task_title") or row.get("task_name")
         or TASK_NAME_CN.get(code) or code)
@@ -1182,11 +1182,21 @@ def _expert_spec_for_task(s, code):
     return spec
 
 
+def _expert_task_row(s, code):
+    """专家任务行：先桌面口径，再回落小程序口径。
+
+    成长中心 UI 里能看到、桌面 `/v2` 列表却没下发的专家任务并不少见；
+    只看桌面列表会把「任务存在」误判成「未下发」。
+    """
+    return _growth_task_row(s, code) or _mp_task_row(s, code)
+
+
 def _dynamic_expert_task_codes(s):
     """发现桌面任务列表里的 expert_use_* 族任务，静态四条只是已审核兜底。"""
+    rows = _growth_task_rows(s) + _growth_task_rows(s, MP_HEADER)
     return sorted({
         str(task.get("task_code") or task.get("code") or "").strip()
-        for task in _growth_task_rows(s)
+        for task in rows
         if str(task.get("task_code") or task.get("code") or "").startswith("expert_use_")
     })
 
@@ -3327,10 +3337,36 @@ def t_lighthouse(s, uid, nick, log):
 VALORANT_EXPERT = {"id": "ex_xQHHD1u5Jkua", "name": "无畏契约拼豆专家", "version": "1.2.1"}
 
 
+def _expert_prog(s, code):
+    """专家任务进度：桌面口径优先，桌面未下发时回落小程序口径。"""
+    st, cur, tgt = prog(s, code)
+    if st is not None:
+        return st, cur, tgt
+    return _mp_prog(s, code)
+
+
+def _accept_expert_task(s, code, log):
+    """接受专家任务：桌面口径失败时再试小程序口径。
+
+    专家任务在不同账号上可能只出现在其中一份任务列表里；只按桌面 accept
+    会在 MP-only 账号上一直返回 task not found。
+    """
+    if prog(s, code)[0] is not None:
+        if _accept_with_verify(s, code, log):
+            return True
+    ok, status, message = _mp_accept_res(s, code)
+    ast = _mp_prog(s, code)[0]
+    if ok and ast in ("accepted", "completed", "claimed"):
+        return True
+    log("      ✗ mp accept %s: %s %s" % (
+        code, status or "无返回", (message or "")[:50]))
+    return False
+
+
 def _run_local_expert_task(s, uid, nick, log, task_code, expert, conv_name="expert"):
     """LOCAL 专家任务共用链：真实对话 + 召唤 + actual_use(mode:LOCAL)。"""
     label = expert.get("profession") or expert.get("name") or task_code
-    st, cur, tgt = prog(s, task_code)
+    st, cur, tgt = _expert_prog(s, task_code)
     if st is None:
         log("   %s: 不在当前任务列表，跳过" % label)
         return
@@ -3341,7 +3377,7 @@ def _run_local_expert_task(s, uid, nick, log, task_code, expert, conv_name="expe
     # 专家任务会停在 not_accepted；不在这里补 accept，真实对话和 actual_use
     # 都不会被计入任务进度。
     if st in ("", "not_accepted"):
-        if not _accept_with_verify(s, task_code, log):
+        if not _accept_expert_task(s, task_code, log):
             log("   %s: 接受任务失败，跳过" % label)
             return
     expert = dict(expert)
@@ -3423,9 +3459,9 @@ def _run_local_expert_task(s, uid, nick, log, task_code, expert, conv_name="expe
         except Exception as exc:
             log("   %s: 桌面链上报失败 %s" % (label, str(exc)[:50]))
         time.sleep(4)
-        status = prog(s, task_code)[0]
+        status = _expert_prog(s, task_code)[0]
         if status in ("completed", "claimed"):
-            st, cur, tgt = prog(s, task_code)
+            st, cur, tgt = _expert_prog(s, task_code)
             log("   %s: %s %s/%s" % (label, st, cur, tgt))
             return
     try:
@@ -3447,7 +3483,7 @@ def _run_local_expert_task(s, uid, nick, log, task_code, expert, conv_name="expe
         time.sleep(3)
     except Exception as exc:
         log("   %s: 失败 %s" % (label, str(exc)[:60]))
-    st, cur, tgt = prog(s, task_code)
+    st, cur, tgt = _expert_prog(s, task_code)
     log("   %s: %s %s/%s" % (label, st, cur, tgt))
 
 
@@ -4120,11 +4156,16 @@ def claim_ready_tasks(s, log):
             can_claim = claimable(task)
             old = merged.get(code)
             if old is None:
-                merged[code] = {"task": task, "mp": mp, "claimable": can_claim}
+                merged[code] = {"task": task, "mp": mp, "desktop": not mp,
+                                "claimable": can_claim}
             elif can_claim and not old["claimable"]:
-                merged[code] = {"task": task, "mp": mp, "claimable": True}
+                merged[code] = {"task": task, "mp": mp,
+                                "desktop": old.get("desktop", False),
+                                "claimable": True}
             elif can_claim and old["claimable"] and mp and not old["mp"]:
-                merged[code] = {"task": task, "mp": True, "claimable": True}
+                merged[code] = {"task": task, "mp": True,
+                                "desktop": old.get("desktop", False),
+                                "claimable": True}
 
     collect()
     collect(MP_HEADER, mp=True)
@@ -4132,8 +4173,11 @@ def claim_ready_tasks(s, log):
     for code, item in merged.items():
         if not item["claimable"]:
             continue
-        use_mp = False if code in DESKTOP_ONLY_TASK_CODES else bool(
-            item["mp"] or code in MP_TASK_CODES)
+        # 专家任务默认走桌面 claim；只有「桌面列表根本没有、只在 MP 列表出现」
+        # 的账号才改用 MP claim。两个列表都有时仍按桌面口径，保持既有行为。
+        use_mp = bool(item["mp"] or code in MP_TASK_CODES)
+        if code in DESKTOP_ONLY_TASK_CODES and item.get("desktop"):
+            use_mp = False
         try:
             ok = _mp_claim(s, code, log) if use_mp else claim(s, code, log)
         except Exception as exc:

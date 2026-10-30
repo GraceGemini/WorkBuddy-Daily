@@ -1143,7 +1143,8 @@ class CoreBehaviorTests(unittest.TestCase):
 
         integration = load_functions(
             "_parse_expert_deeplink", "_expert_id_from_jump_url",
-            "_growth_task_rows", "_growth_task_row", "_expert_spec_for_task",
+            "_growth_task_rows", "_growth_task_row", "_expert_task_row",
+            "_expert_spec_for_task",
             parse_qs=parse_qs, urlparse=urlparse, re=re,
             _EXPERT_ID_RE=re.compile(r"^ex_[A-Za-z0-9]{6,64}$"),
             _TRUSTED_JUMP_HOST_SUFFIXES=(
@@ -1151,6 +1152,7 @@ class CoreBehaviorTests(unittest.TestCase):
             EXPERT_TASK_SPECS=specs,
             TASK_NAME_CN=names,
             BASE="https://example.test",
+            _mp_task_row=lambda session, code: None,
         )
         spec = integration["_expert_spec_for_task"](
             Session(), "expert_use_maidehao")
@@ -1246,6 +1248,7 @@ class CoreBehaviorTests(unittest.TestCase):
             }),
             _EXPERT_ID_RE=re.compile(r"^ex_[A-Za-z0-9]{6,64}$"),
             prog=lambda session, code: states.pop(0),
+            _expert_prog=lambda session, code: states.pop(0),
             _market_expert_by_id=lambda session, keyword, expected_id: {
                 "name": "斗音音",
                 "profession": "抖音策略师",
@@ -1313,6 +1316,7 @@ class CoreBehaviorTests(unittest.TestCase):
             }),
             _EXPERT_ID_RE=re.compile(r"^ex_[A-Za-z0-9]{6,64}$"),
             prog=lambda session, code: states.pop(0),
+            _expert_prog=lambda session, code: states.pop(0),
             _market_expert_by_id=lambda session, keyword, expected_id: {
                 "id": "ex_FutureExpert1",
                 "name": "未来专家昵称",
@@ -1366,7 +1370,8 @@ class CoreBehaviorTests(unittest.TestCase):
             }),
             _EXPERT_ID_RE=re.compile(r"^ex_[A-Za-z0-9]{6,64}$"),
             prog=lambda session, code: states.pop(0),
-            _accept_with_verify=lambda session, code, log: (
+            _expert_prog=lambda session, code: states.pop(0),
+            _accept_expert_task=lambda session, code, log: (
                 accepted.append(code) or True),
             _market_expert_by_id=lambda session, keyword, expected_id: {
                 "name": "斗音音",
@@ -1393,6 +1398,17 @@ class CoreBehaviorTests(unittest.TestCase):
         self.assertEqual(["expert_use_douyinyin"], accepted)
         self.assertIn("chat", captured)
         self.assertIn("completed 1/1", " ".join(logs))
+
+    def test_expert_prog_falls_back_to_mp_when_desktop_list_omits_task(self):
+        """UI 能看到、桌面列表没下发时，专家任务必须回落 MP 口径。"""
+        module = load_functions(
+            "_expert_prog",
+            prog=lambda session, code: (None, None, None),
+            _mp_prog=lambda session, code: ("not_accepted", 0, 1),
+        )
+        self.assertEqual(
+            ("not_accepted", 0, 1),
+            module["_expert_prog"](object(), "expert_use_douyinyin"))
 
     def test_expert_use_tasks_claim_on_desktop_even_when_mp_rows_exist(self):
         codes = {
@@ -1449,6 +1465,55 @@ class CoreBehaviorTests(unittest.TestCase):
         self.assertEqual(codes, claimed)
         self.assertTrue(all(headers is None for _, headers in session.posts))
         self.assertIn("达标补领完成: 4 项", " ".join(logs))
+
+    def test_mp_only_expert_task_claims_with_mp_headers(self):
+        """专家任务只在 MP 列表出现时，claim 也必须走 MP 口径。"""
+        mp_tasks = {
+            "data": {"tasks": [{
+                "task_code": "expert_use_douyinyin",
+                "accept_status": "accepted",
+                "progress": {"current": 1, "target": 1},
+            }]},
+        }
+        desktop_tasks = {"data": {"tasks": []}}
+
+        class Session:
+            def __init__(self):
+                self.posts = []
+
+            def get(self, url, **kwargs):
+                return FakeResponse(
+                    payload=mp_tasks if kwargs.get("headers") else desktop_tasks)
+
+            def post(self, url, **kwargs):
+                self.posts.append((url, kwargs.get("headers")))
+                return FakeResponse(payload={
+                    "code": 0,
+                    "data": {"credit": 50, "energy": 5},
+                })
+
+        module = load_functions(
+            "_api_code_ok", "_claim_response_ok", "claim", "_mp_claim",
+            "claim_ready_tasks",
+            _as_int=lambda value, default=0: int(value or default),
+            BASE="https://example.test",
+            MP_HEADER={"X-Client-Platform": "miniprogram"},
+            MP_TASK_CODES=set(),
+            DESKTOP_ONLY_TASK_CODES=frozenset({
+                "expert_use_maidehao", "expert_use_douyinyin",
+                "expert_use_shangjia_xuanchuan", "expert_use_bowangwang",
+            }),
+            time=type("Time", (), {"sleep": staticmethod(lambda seconds: None)}),
+        )
+        session = Session()
+        logs = []
+        module["claim_ready_tasks"](session, logs.append)
+
+        self.assertEqual(1, len(session.posts))
+        url, headers = session.posts[0]
+        self.assertIn("expert_use_douyinyin", url)
+        self.assertEqual({"X-Client-Platform": "miniprogram"}, headers)
+        self.assertIn("达标补领完成: 1 项", " ".join(logs))
 
     def test_desktop_fingerprint_matches_cn_current_shape(self):
         module = load_functions(
