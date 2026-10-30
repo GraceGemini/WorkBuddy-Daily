@@ -1,5 +1,12 @@
 # 更新日志
 
+## v3.29（2026-10-30）
+
+- 修复 Issue #42（1）：`ACCOUNTS = load_accounts()` 在 `uid_of()` 定义前执行；v3.27 给 `refresh_one` 增加 `X-User-Id` 后，首次自动续期会触发 `NameError: name 'uid_of' is not defined`，请求根本发不出去。现将 `uid_of` 定义提前到 `refresh_one` 之前，续期恢复发送并携带 `X-User-Id`。
+- 修复 Issue #42（2）：`auto_refresh` 合并 `WORKBUDDY_REFRESH_TOKEN` 时不再用会轮换的 RT 去重，改为按 JWT `sub`（无 `sub` 时用显式 user/手机号）稳定身份合并；已存在账号不会被环境变量里的旧 RT 覆盖，无稳定身份时保留 store 现有账号。
+- v3.28 未改这条路径：v27→v28 的脚本差异仅为 `_token_sanity` 接受 `copilot.tencent.com` 签发域及版本号；`uid_of` 调用由 v3.27 的续期头改动引入。
+- 新增模块导入续期、重复运行不覆盖轮换 RT、JWT subject 合并、无稳定身份保留账号 4 项回归，测试总数 59 项。
+
 ## v3.28（2026-10-30）
 
 - 修复 Issue #40：凭据体检接受 `https://copilot.tencent.com/auth/realms/copilot` 国内签发域，登录工具产出的 CN Token 不再被误报为未知来源；v3.27 的续期头修复继续生效。

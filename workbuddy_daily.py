@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌱 WorkBuddy Daily - 全能签到脚本 v3.28
+🌱 WorkBuddy Daily - 全能签到脚本 v3.29
 ════════════════════════════════════════════════════════════════
 
 📌 这是什么
@@ -544,6 +544,25 @@ def _token_user(tok):
     return str(_jwt_claims(tok).get("preferred_username") or "").strip()
 
 
+def _account_identity(user, at="", rt=""):
+    """返回账号稳定身份：优先 JWT subject，其次显式 user（手机号/备注）。
+
+    只用于启动时合并环境变量账号，不能让轮换后的 RT 参与身份判断——
+    RT 每次刷新都会变化，用它会重复新增账号并覆盖已轮换的令牌。
+    无稳定身份时返回空字符串，调用方必须保留 store 里的现有账号。
+    """
+    for tok in (at, rt):
+        sub = str(_jwt_claims(tok).get("sub") or "").strip()
+        if sub:
+            return "sub:" + sub
+    for tok in (at, rt):
+        name = str(_jwt_claims(tok).get("preferred_username") or "").strip()
+        if name:
+            return "user:" + name
+    user = str(user or "").strip()
+    return "user:" + user if user else ""
+
+
 def _parse_env_tokens(raw):
     """解析环境变量：支持换行或 @ 分隔；每项返回 (手机号, AT, RT)。
 
@@ -662,6 +681,13 @@ def jwt_user(tok):
         return "?"
 
 
+def uid_of(tok):
+    try:
+        return json.loads(base64.urlsafe_b64decode(tok.split(".")[1] + "==")).get("sub", "")
+    except Exception:
+        return ""
+
+
 def refresh_one(rt, at=""):
     """刷新单个 RT，返回 (新 AT, 新 RT) 或 (None, 错误信息)。
 
@@ -763,18 +789,31 @@ def auto_refresh():
             store = json.load(open(REFRESH_STORE, encoding="utf-8")) if os.path.exists(REFRESH_STORE) else {}
         except Exception:
             store = {}
-        existing_rt = {v.get("refresh_token") for v in store.values()}
+        existing_identity = {}
+        for key, ent in store.items():
+            ident = _account_identity(
+                key, ent.get("access_token", ""), ent.get("refresh_token", ""))
+            if ident:
+                existing_identity.setdefault(ident, key)
         added = 0
         for user, at, rt in _parse_env_tokens(env_rt):
             if not (rt or at):
                 continue
-            key = user or (_token_user(at) if at else "env-%d" % (len(store) + 1))
-            if rt and rt in existing_rt:
+            ident = _account_identity(user, at, rt)
+            if not ident:
+                # 没有稳定身份：保留 store 里的现有账号，不用环境变量覆盖
                 continue
-            store[key] = {"refresh_token": rt or store.get(key, {}).get("refresh_token", ""),
-                          "access_token": at or store.get(key, {}).get("access_token", "")}
-            if rt:
-                existing_rt.add(rt)
+            if ident in existing_identity:
+                continue
+            key = user or (_token_user(at) if at else "env-%d" % (len(store) + 1))
+            if key in store:       # 同名但不是同一稳定身份：保留旧账号，另起键名
+                base = key
+                suffix = 2
+                while key in store:
+                    key = "%s-%d" % (base, suffix)
+                    suffix += 1
+            store[key] = {"refresh_token": rt or "", "access_token": at or ""}
+            existing_identity[ident] = key
             added += 1
         if added:
             json.dump(store, open(REFRESH_STORE, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
@@ -1079,13 +1118,6 @@ def is_account_restricted(status_code, payload):
         "账号受限", "账号被限制", "账户受限",
     )
     return int(status_code or 0) == 403 and any(marker in blob for marker in markers)
-
-
-def uid_of(tok):
-    try:
-        return json.loads(base64.urlsafe_b64decode(tok.split(".")[1] + "==")).get("sub", "")
-    except Exception:
-        return ""
 
 
 def nickname_of(tok):

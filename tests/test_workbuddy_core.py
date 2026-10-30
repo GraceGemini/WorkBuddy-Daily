@@ -7,8 +7,10 @@ import json
 import math
 import os
 import re
+import sys
 import tempfile
 import time
+import types
 import unittest
 import uuid
 from pathlib import Path
@@ -81,6 +83,13 @@ class FakeSession:
     def post(self, url, **kwargs):
         self.calls.append(("POST", url, kwargs))
         return self.responses.pop(0)
+
+
+def jwt_token(payload):
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    return "eyJ." + encoded + ".sig"
 
 
 class CoreBehaviorTests(unittest.TestCase):
@@ -529,6 +538,222 @@ class CoreBehaviorTests(unittest.TestCase):
             "X-Request-ID",
             "X-Domain",
         }, set(headers))
+
+    def test_module_import_can_refresh_due_account_with_uid_header(self):
+        """ACCOUNTS 初始化早于 uid_of 时，续期会 NameError 且请求根本发不出去。"""
+        now = int(time.time())
+        old_at = jwt_token({
+            "typ": "Bearer", "sub": "sub-1",
+            "preferred_username": "13800000000", "exp": now - 60,
+        })
+        old_rt = jwt_token({
+            "typ": "Offline", "sub": "sub-1",
+            "preferred_username": "13800000000",
+        })
+        new_at = jwt_token({
+            "typ": "Bearer", "sub": "sub-1",
+            "preferred_username": "13800000000", "exp": now + 86400 * 30,
+        })
+        new_rt = jwt_token({
+            "typ": "Offline", "sub": "sub-1",
+            "preferred_username": "13800000000", "jti": "new",
+        })
+        calls = []
+
+        class Session:
+            trust_env = True
+
+            def post(self, url, **kwargs):
+                calls.append((url, kwargs.get("headers", {})))
+                return FakeResponse(payload={
+                    "code": 0,
+                    "data": {"accessToken": new_at, "refreshToken": new_rt},
+                })
+
+        fake_requests = types.ModuleType("requests")
+        fake_requests.Session = Session
+        previous_requests = sys.modules.get("requests")
+        previous_state = os.environ.get("WORKBUDDY_STATE_DIR")
+        previous_env = os.environ.get("WORKBUDDY_REFRESH_TOKEN")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            os.environ["WORKBUDDY_STATE_DIR"] = temp_dir
+            os.environ["WORKBUDDY_REFRESH_TOKEN"] = "13800000000:%s:%s" % (
+                old_at, old_rt)
+            sys.modules["requests"] = fake_requests
+            namespace = {
+                "__name__": "workbuddy_import_probe",
+                "__file__": str(SOURCE_PATH),
+                "__builtins__": __builtins__,
+            }
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    exec(compile(SOURCE, str(SOURCE_PATH), "exec"), namespace)
+            finally:
+                if previous_requests is not None:
+                    sys.modules["requests"] = previous_requests
+                else:
+                    sys.modules.pop("requests", None)
+                if previous_state is None:
+                    os.environ.pop("WORKBUDDY_STATE_DIR", None)
+                else:
+                    os.environ["WORKBUDDY_STATE_DIR"] = previous_state
+                if previous_env is None:
+                    os.environ.pop("WORKBUDDY_REFRESH_TOKEN", None)
+                else:
+                    os.environ["WORKBUDDY_REFRESH_TOKEN"] = previous_env
+
+        self.assertEqual(1, len(calls), "续期请求应实际发出，不能被 NameError 吞掉")
+        self.assertEqual("sub-1", calls[0][1].get("X-User-Id"))
+        self.assertEqual(1, len(namespace["ACCOUNTS"]))
+        self.assertEqual(new_rt, namespace["ACCOUNTS"][0]["refresh_token"])
+
+    def test_env_merge_repeated_runs_preserve_rotated_refresh_token(self):
+        """相同 env 输入重复运行：按 JWT subject 合并，不能覆盖已轮换的 RT。"""
+        now = int(time.time())
+        old_at = jwt_token({
+            "typ": "Bearer", "sub": "sub-1",
+            "preferred_username": "13800000000", "exp": now + 86400 * 30,
+        })
+        old_rt = jwt_token({
+            "typ": "Offline", "sub": "sub-1",
+            "preferred_username": "13800000000", "jti": "original",
+        })
+        rotated_at = jwt_token({
+            "typ": "Bearer", "sub": "sub-1",
+            "preferred_username": "13800000000", "exp": now + 86400 * 30,
+        })
+        rotated_rt = jwt_token({
+            "typ": "Offline", "sub": "sub-1",
+            "preferred_username": "13800000000", "jti": "rotated",
+        })
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store_path = os.path.join(temp_dir, "wb_refresh_tokens.json")
+            with open(store_path, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "old-note": {
+                        "refresh_token": rotated_rt,
+                        "access_token": rotated_at,
+                        "updated": time.strftime("%Y-%m-%d %H:%M"),
+                    },
+                }, handle, ensure_ascii=False)
+            previous_env = os.environ.get("WORKBUDDY_REFRESH_TOKEN")
+            os.environ["WORKBUDDY_REFRESH_TOKEN"] = "new-note:%s:%s" % (
+                old_at, old_rt)
+            refresh_calls = []
+            module = load_functions(
+                "auto_refresh", "_account_identity", "_parse_env_tokens",
+                "_token_kind", "_token_user", "_jwt_claims",
+                os=os, json=json, base64=base64, time=time,
+                REFRESH_STORE=store_path,
+                TOKEN_FILE=os.path.join(temp_dir, "WORKBUDDY_ACCESS_TOKEN.txt"),
+                refresh_one=lambda rt, at="": (
+                    refresh_calls.append((rt, at)) or (rotated_at, rotated_rt)),
+                _token_sanity=lambda rt, at: [],
+                _rebuild_token_file=lambda store: None,
+            )
+            try:
+                outputs = []
+                for _ in range(2):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output):
+                        module["auto_refresh"]()
+                    outputs.append(output.getvalue())
+            finally:
+                if previous_env is None:
+                    os.environ.pop("WORKBUDDY_REFRESH_TOKEN", None)
+                else:
+                    os.environ["WORKBUDDY_REFRESH_TOKEN"] = previous_env
+            with open(store_path, encoding="utf-8") as handle:
+                store = json.load(handle)
+
+        self.assertEqual(["old-note"], list(store))
+        self.assertEqual(rotated_rt, store["old-note"]["refresh_token"])
+        self.assertEqual([], refresh_calls)
+        self.assertFalse(any("新增" in line for line in outputs))
+
+    def test_env_merge_falls_back_to_user_when_tokens_have_no_subject(self):
+        now = int(time.time())
+        old_at = jwt_token({"typ": "Bearer", "exp": now + 86400 * 30})
+        old_rt = jwt_token({"typ": "Offline"})
+        rotated_rt = jwt_token({"typ": "Offline", "jti": "rotated"})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store_path = os.path.join(temp_dir, "wb_refresh_tokens.json")
+            with open(store_path, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "13800000000": {
+                        "refresh_token": rotated_rt,
+                        "access_token": old_at,
+                        "updated": time.strftime("%Y-%m-%d %H:%M"),
+                    },
+                }, handle, ensure_ascii=False)
+            previous_env = os.environ.get("WORKBUDDY_REFRESH_TOKEN")
+            os.environ["WORKBUDDY_REFRESH_TOKEN"] = "13800000000:%s:%s" % (
+                old_at, old_rt)
+            module = load_functions(
+                "auto_refresh", "_account_identity", "_parse_env_tokens",
+                "_token_kind", "_token_user", "_jwt_claims",
+                os=os, json=json, base64=base64, time=time,
+                REFRESH_STORE=store_path,
+                TOKEN_FILE=os.path.join(temp_dir, "WORKBUDDY_ACCESS_TOKEN.txt"),
+                refresh_one=lambda rt, at="": (old_at, rotated_rt),
+                _token_sanity=lambda rt, at: [],
+                _rebuild_token_file=lambda store: None,
+            )
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    module["auto_refresh"]()
+            finally:
+                if previous_env is None:
+                    os.environ.pop("WORKBUDDY_REFRESH_TOKEN", None)
+                else:
+                    os.environ["WORKBUDDY_REFRESH_TOKEN"] = previous_env
+            with open(store_path, encoding="utf-8") as handle:
+                store = json.load(handle)
+
+        self.assertEqual(rotated_rt, store["13800000000"]["refresh_token"])
+        self.assertEqual(1, len(store))
+
+    def test_env_merge_without_stable_identity_preserves_existing_account(self):
+        now = int(time.time())
+        at = jwt_token({"typ": "Bearer", "exp": now + 86400 * 30})
+        rt = jwt_token({"typ": "Offline", "jti": "env"})
+        rotated_rt = jwt_token({"typ": "Offline", "jti": "rotated"})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store_path = os.path.join(temp_dir, "wb_refresh_tokens.json")
+            with open(store_path, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "13800000000": {
+                        "refresh_token": rotated_rt,
+                        "access_token": at,
+                        "updated": time.strftime("%Y-%m-%d %H:%M"),
+                    },
+                }, handle, ensure_ascii=False)
+            previous_env = os.environ.get("WORKBUDDY_REFRESH_TOKEN")
+            # AT:RT 且两个 token 都没有 sub / 手机号：没有稳定身份
+            os.environ["WORKBUDDY_REFRESH_TOKEN"] = "%s:%s" % (at, rt)
+            module = load_functions(
+                "auto_refresh", "_account_identity", "_parse_env_tokens",
+                "_token_kind", "_token_user", "_jwt_claims",
+                os=os, json=json, base64=base64, time=time,
+                REFRESH_STORE=store_path,
+                TOKEN_FILE=os.path.join(temp_dir, "WORKBUDDY_ACCESS_TOKEN.txt"),
+                refresh_one=lambda rt, at="": (at, rotated_rt),
+                _token_sanity=lambda rt, at: [],
+                _rebuild_token_file=lambda store: None,
+            )
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    module["auto_refresh"]()
+            finally:
+                if previous_env is None:
+                    os.environ.pop("WORKBUDDY_REFRESH_TOKEN", None)
+                else:
+                    os.environ["WORKBUDDY_REFRESH_TOKEN"] = previous_env
+            with open(store_path, encoding="utf-8") as handle:
+                store = json.load(handle)
+
+        self.assertEqual(["13800000000"], list(store))
+        self.assertEqual(rotated_rt, store["13800000000"]["refresh_token"])
 
     def test_black_cat_missing_task_does_not_run_fake_chat_attempts(self):
         chats = []
