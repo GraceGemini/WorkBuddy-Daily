@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌱 WorkBuddy Daily - 全能签到脚本 v3.30
+🌱 WorkBuddy Daily - 全能签到脚本 v3.31
 ════════════════════════════════════════════════════════════════
 
 📌 这是什么
@@ -210,8 +210,10 @@ WEB_CONVERSATION_ACTIVE_STATUSES = ("working", "creating", "pending")
 WEB_CONVERSATION_PRUNE_KEEP = 8
 WORKBUDDY_UA_CN = "WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0"
 DESKTOP_VERSION_CN = "5.9.3"
-DESKTOP_COMMIT_CN = "c41253385fa07bebfcae8a7a4728914f09af96d0"
-DESKTOP_RELEASE_CN = 1789632000000
+# 5.9.3.42398134-d4692421 官方安装包对应的构建号与 releaseDate；
+# 不要用第三方仓库里抄错的 5.8.x 旧值冒充 5.9.3 指纹。
+DESKTOP_COMMIT_CN = "d46924219e79332f49c37ccebf27292f87001b19"
+DESKTOP_RELEASE_CN = 1793093056315
 UA = WORKBUDDY_UA_CN
 
 # ---------- 任务代码 → 中文名映射 ----------
