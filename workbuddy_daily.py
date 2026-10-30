@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌱 WorkBuddy Daily - 全能签到脚本 v3.33
+🌱 WorkBuddy Daily - 全能签到脚本 v3.34
 ════════════════════════════════════════════════════════════════
 
 📌 这是什么
@@ -4580,6 +4580,9 @@ def run_account(idx, acc, do_desktop):
     _run("小程序GLM5.2", ["Sequential_Tasks_5"], lambda: t_sequential_tasks_5(s, uid, nick, log))
     _run("小程序对话10次", ["Sequential_Tasks_6"], lambda: t_sequential_tasks_6(s, uid, nick, log))
     _run("PC灵感功能", ["Sequential_Tasks_7"], lambda: t_sequential_tasks_7(s, uid, nick, log))
+    # 盲盒/旅行/抽奖都消耗能量；先把已达标任务的奖励结算掉，
+    # 否则今天任务发的能量要等到下一轮才可见（盲盒会误报能量不足）。
+    claim_ready_tasks(s, log)
     _run("徽章", ["badges"], lambda: t_badges(s, uid, nick, log))
     _run("盲盒", ["blindbox"], lambda: t_blindbox(s, uid, nick, log))
     _run("Buddy 信息", ["buddy_info"], lambda: t_buddy_info(s, uid, nick, log))
