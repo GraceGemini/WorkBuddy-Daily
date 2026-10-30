@@ -1,5 +1,13 @@
 # 更新日志
 
+## v3.32（2026-10-30）
+
+- 修复动态解锁的专家任务一直停在 `not_accepted`：`_run_local_expert_task` 原来只读 `prog()`，不补 accept；任务在 `t_accept_all` 之后才出现时，真实对话和 `expert_actual_use` 都不会计入进度，日志只剩 `not_accepted None/None`。
+- 进入专家任务时若状态为 `""` / `not_accepted`，先走 `_accept_with_verify`；登记失败直接跳过，不再白跑对话。
+- 真实对话没有返回 `conversationId` 或服务端消息 ID 时输出明确诊断，不再静默 fallback。
+- `_web_conversation_prune` 改为按账号级活跃上限清理；原实现只清同 `expert-<slug>` 前缀，跨专家累计到 10 条时永远清不掉。
+- 新增 2 项回归（专家任务先 accept、跨前缀清理），测试总数 61 项。
+
 ## v3.31（2026-10-30）
 
 - 修正 v3.30 的 5.9.3 构建指纹：`commit` 改为官方安装包 `5.9.3.42398134-d4692421` 的 `d46924219e79332f49c37ccebf27292f87001b19`，`releaseDate` 改为 `1793093056315`。

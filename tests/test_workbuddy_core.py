@@ -935,6 +935,55 @@ class CoreBehaviorTests(unittest.TestCase):
         self.assertEqual(2, len(session.stops))
         self.assertTrue(session.stops[0].endswith("/old-00/stop"))
 
+    def test_web_conversation_prune_is_account_wide_not_prefix_scoped(self):
+        """账号级 10 条上限：其他专家前缀的活跃会话也必须能被清掉。"""
+        class Session:
+            def __init__(self):
+                self.create_count = 0
+                self.stops = []
+
+            def get(self, url, **kwargs):
+                names = ("expert-douyinyin", "expert-maidehao",
+                         "expert-shangjia-xuanchuan", "expert-bowangwang")
+                rows = [{
+                    "id": "old-%02d" % i,
+                    "name": "%s-%08x" % (names[i % len(names)], i),
+                    "status": "working",
+                    "createdAt": "2026-10-22T10:%02d:00+08:00" % i,
+                } for i in range(10)]
+                return FakeResponse(payload={"data": {"conversations": rows}})
+
+            def post(self, url, **kwargs):
+                if url.endswith("/conversations"):
+                    self.create_count += 1
+                    if self.create_count == 1:
+                        return FakeResponse(
+                            429, {"code": 10105,
+                                  "msg": "maximum number of active conversations(10)"})
+                    return FakeResponse(
+                        payload={"code": 0,
+                                 "data": {"conversationId": "new-conv"}})
+                if url.endswith("/stop"):
+                    self.stops.append(url)
+                    return FakeResponse(payload={"code": 0, "data": {}})
+                return FakeResponse(payload={"code": 0, "data": {}})
+
+        module = load_functions(
+            "_web_conversation_limit_hit", "_web_conversation_action",
+            "_web_conversation_prune", "_web_conversation_create",
+            BASE="https://example.test",
+            WEB_CONVERSATIONS_PATH="/console/webchat/conversations",
+            WEB_CONVERSATION_ACTIVE_STATUSES=("working", "creating", "pending"),
+            WEB_CONVERSATION_PRUNE_KEEP=8,
+            requests=requests, json=json, uuid=uuid,
+        )
+        session = Session()
+        conv_id = module["_web_conversation_create"](
+            session, "expert-douyinyin")
+        self.assertEqual("new-conv", conv_id)
+        self.assertEqual(2, len(session.stops))
+        self.assertTrue(session.stops[0].endswith("/old-00/stop"))
+
     def test_makeup_candidates_use_server_calendar_and_exclude_made_up_dates(self):
         module = load_functions("_dig", "_makeup_candidates", re=re, math=math)
         streak_body = {
@@ -1296,6 +1345,54 @@ class CoreBehaviorTests(unittest.TestCase):
         self.assertEqual("未来职业", actual["expertTitle"])
         self.assertEqual("2.0.0", actual["version"])
         self.assertEqual("LOCAL", actual["mode"])
+
+    def test_local_expert_flow_accepts_not_accepted_task_before_chat(self):
+        """运行中才解锁的专家任务会停在 not_accepted，必须先补 accept。"""
+        states = [("not_accepted", None, None), ("completed", 1, 1),
+                  ("completed", 1, 1)]
+        accepted = []
+        captured = {}
+
+        def webchat2(session, name, prompt, meta):
+            captured["chat"] = (name, prompt, meta)
+            return "conv-accepted", "OK", "cmb-0123456789abcdef0123456789abcdef"
+
+        module = load_functions(
+            "_run_local_expert_task",
+            re=re, uuid=uuid, json=json,
+            time=type("Time", (), {
+                "time": staticmethod(time.time),
+                "sleep": staticmethod(lambda seconds: None),
+            }),
+            _EXPERT_ID_RE=re.compile(r"^ex_[A-Za-z0-9]{6,64}$"),
+            prog=lambda session, code: states.pop(0),
+            _accept_with_verify=lambda session, code, log: (
+                accepted.append(code) or True),
+            _market_expert_by_id=lambda session, keyword, expected_id: {
+                "name": "斗音音",
+                "profession": "抖音策略师",
+                "version": "1.0.2",
+            },
+            get_normal_experts=lambda count: [],
+            webchat2=webchat2,
+            desktop_chat_sequence=lambda uid, nick, conv, req, msg: [],
+            report_desktop_events=lambda session, uid, nick, events: 200,
+            report=lambda *args, **kwargs: 200,
+            _new_message_id=lambda: "fallback-message",
+            _new_conversation_id=lambda: "fallback-conversation",
+        )
+        logs = []
+        module["_run_local_expert_task"](
+            object(), "uid-1", "nick", logs.append,
+            "expert_use_douyinyin",
+            {"id": "ex_Dynamic12345", "name": "斗音音",
+             "profession": "抖音策略师", "version": "1.0.2",
+             "slug": "douyinyin"},
+            conv_name="expert-douyinyin",
+        )
+        self.assertEqual(["expert_use_douyinyin"], accepted)
+        self.assertIn("chat", captured)
+        self.assertIn("completed 1/1", " ".join(logs))
 
     def test_expert_use_tasks_claim_on_desktop_even_when_mp_rows_exist(self):
         codes = {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🌱 WorkBuddy Daily - 全能签到脚本 v3.31
+🌱 WorkBuddy Daily - 全能签到脚本 v3.32
 ════════════════════════════════════════════════════════════════
 
 📌 这是什么
@@ -1341,7 +1341,12 @@ def _web_conversation_action(s, conversation_id, action):
 
 
 def _web_conversation_prune(s, prefix, keep=WEB_CONVERSATION_PRUNE_KEEP):
-    """撞到 10105 时，停掉同前缀的最旧活跃会话，最多保留 keep 条。"""
+    """撞到 10105 时，停掉最旧的活跃会话，最多保留 keep 条。
+
+    上限是**账号级**的，不是按任务名前缀分组：专家任务每个 code 都有自己的
+    `expert-<slug>` 前缀，只清同前缀会在跨任务累计到 10 条时永远清不掉。
+    `prefix` 保留仅为兼容调用方。
+    """
     try:
         response = s.get(
             BASE + WEB_CONVERSATIONS_PATH,
@@ -1359,8 +1364,6 @@ def _web_conversation_prune(s, prefix, keep=WEB_CONVERSATION_PRUNE_KEEP):
         status = str(row.get("status") or "").lower()
         name = str(row.get("name") or "")
         if status not in WEB_CONVERSATION_ACTIVE_STATUSES:
-            continue
-        if prefix and not name.startswith(prefix + "-"):
             continue
         active.append(row)
     if len(active) < 10:
@@ -3334,6 +3337,13 @@ def _run_local_expert_task(s, uid, nick, log, task_code, expert, conv_name="expe
     if st in ("completed", "claimed"):
         log("   %s: %s %s/%s" % (label, st, cur, tgt))
         return
+    # 任务列表是运行中动态解锁的：启动时 t_accept_all 扫不到、后来才出现的
+    # 专家任务会停在 not_accepted；不在这里补 accept，真实对话和 actual_use
+    # 都不会被计入任务进度。
+    if st in ("", "not_accepted"):
+        if not _accept_with_verify(s, task_code, log):
+            log("   %s: 接受任务失败，跳过" % label)
+            return
     expert = dict(expert)
     if expert.get("id") and not _EXPERT_ID_RE.fullmatch(str(expert.get("id") or "")):
         log("   %s: 专家 ID 格式无效，跳过" % label)
@@ -3383,6 +3393,9 @@ def _run_local_expert_task(s, uid, nick, log, task_code, expert, conv_name="expe
         conv_id, _txt, mid = webchat2(s, conv_name, prompt, meta)
     except Exception as exc:
         log("   %s: 对话异常 %s" % (label, str(exc)[:50]))
+    if not conv_id or not mid:
+        log("   %s: 真实对话未返回会话/消息 ID（会话=%s 消息=%s），本次不计数"
+            % (label, conv_id or "-", mid or "-"))
     if conv_id and mid:
         summon = [
             {"eventCode": "expert_summon_click", "id": expert["id"], "name": display_name,
